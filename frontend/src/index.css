@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-paper font-sans text-ink antialiased; }
+  h1, h2, h3 { @apply font-display; }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply rounded-full bg-stone-300; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-stone-400; }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2.5 text-sm outline-none transition-all duration-200
+           placeholder:text-stone-400
+           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:shadow-sm;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-gradient-to-r from-brand-500 to-brand-600 text-white
+           shadow-sm hover:from-brand-600 hover:to-brand-700 hover:shadow-md
+           active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply btn border border-stone-200 bg-white text-ink
+           hover:bg-stone-50 hover:border-stone-300 hover:shadow-sm
+           active:scale-[0.98];
+  }
+
+  .btn-danger {
+    @apply btn bg-accent-600 text-white hover:bg-accent-700 shadow-sm active:scale-[0.98];
+  }
+
+  .card {
+    @apply rounded-2xl border border-stone-200/60 bg-white shadow-card
+           transition-shadow duration-200;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer hover:shadow-card-hover hover:border-stone-300/60;
+  }
+}
+
+/* Print styles */
+@media print { @page { margin: 0; } body { background: #fff; } }
+
+/* Sidebar scrollbar */
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb { @apply rounded-full bg-white/20; }
