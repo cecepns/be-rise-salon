@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Menu, LogOut, Home, ChevronRight, X } from 'lucide-react';
 import { MENU } from '@/utils/menu';
 import { useAuth } from '@/hooks/useAuth';
+import { imageUrl } from '@/utils/format';
 
 export default function Layout() {
   const [open, setOpen] = useState(false);
@@ -67,17 +68,28 @@ export default function Layout() {
 
         {/* User area + logout */}
         <div className="border-t border-white/10 p-3">
-          <div className="mb-2 rounded-xl bg-white/10 px-3 py-2.5">
-            <div className="text-sm font-semibold text-white">{user?.name}</div>
-            <div className="text-[11px] font-medium capitalize text-white/60">
-              {user?.role === 'owner' ? '👑 Owner' : '💼 Pegawai'}
+          <div className="mb-2 flex items-center gap-3 rounded-xl bg-white/10 p-2.5">
+            <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-white/20 ring-1 ring-white/20">
+              {user?.photo ? (
+                <img src={imageUrl(user.photo)} alt={user.name} className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full w-full place-items-center text-xs font-bold text-white">
+                  {user?.name?.charAt(0)?.toUpperCase() || '?'}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-white">{user?.name}</div>
+              <div className="text-[11px] font-medium capitalize text-white/60">
+                {user?.role === 'owner' ? '👑 Owner' : '💼 Pegawai'}
+              </div>
             </div>
           </div>
           <button
             onClick={logout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-white/60 transition-all hover:bg-accent-600/20 hover:text-accent-100"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-white/60 transition-all hover:bg-accent-600/20 hover:text-accent-100"
           >
-            <LogOut size={18} />
+            <LogOut size={16} />
             Keluar
           </button>
         </div>
@@ -105,14 +117,20 @@ export default function Layout() {
             </div>
 
             <div className="ml-auto flex items-center gap-3">
-              <div className="text-right text-sm leading-tight">
+              <div className="hidden text-right text-sm leading-tight sm:block">
                 <div className="font-semibold text-ink">{user?.name}</div>
                 <div className="text-xs capitalize text-stone-500">
                   {user?.role === 'owner' ? 'Owner' : 'Pegawai'}
                 </div>
               </div>
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-warm text-sm font-bold text-white shadow-sm">
-                {user?.name?.charAt(0)?.toUpperCase() || '?'}
+              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full ring-2 ring-stone-200/80 shadow-sm">
+                {user?.photo ? (
+                  <img src={imageUrl(user.photo)} alt={user.name} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="grid h-full w-full place-items-center bg-gradient-warm text-sm font-bold text-white">
+                    {user?.name?.charAt(0)?.toUpperCase() || '?'}
+                  </div>
+                )}
               </div>
             </div>
           </div>

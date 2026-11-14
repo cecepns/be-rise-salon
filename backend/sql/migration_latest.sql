@@ -91,3 +91,10 @@ FROM transactions t
 JOIN staff s ON s.id = t.staff_id
 LEFT JOIN transaction_staff ts ON ts.transaction_id = t.id AND ts.staff_id = t.staff_id
 WHERE t.staff_id IS NOT NULL AND ts.id IS NULL;
+
+-- 8. Tambahkan kolom photo pada tabel users jika belum ada
+SET @user_photo_exists := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'photo');
+SET @sql_user_photo := IF(@user_photo_exists = 0, 'ALTER TABLE users ADD COLUMN photo VARCHAR(255) NULL AFTER role;', 'SELECT 1;');
+PREPARE stmt_user_photo FROM @sql_user_photo;
+EXECUTE stmt_user_photo;
+DEALLOCATE PREPARE stmt_user_photo;

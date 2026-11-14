@@ -41,7 +41,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   if (!username || !password) throw fail(400, 'Username dan password wajib diisi');
   const [u] = await q('SELECT * FROM users WHERE username = ? AND is_active = 1', [username]);
   if (!u || !(await bcrypt.compare(password, u.password_hash))) throw fail(401, 'Username atau password salah');
-  const user = { id: u.id, name: u.name, role: u.role };
+  const user = { id: u.id, name: u.name, role: u.role, photo: u.photo || null };
   const token = jwt.sign(user, process.env.JWT_SECRET || 'be-rise-salon-secret-key', { expiresIn: '12h' });
   res.json({ success: true, token, user });
 }));
@@ -54,7 +54,10 @@ app.use('/api', (req, res, next) => {
   } catch { next(fail(401, 'Sesi berakhir, silakan login ulang')); }
 });
 app.use('/api', (req, res, next) => (req.method === 'DELETE' ? ownerOnly(req, res, next) : next()));
-app.get('/api/auth/profile', (req, res) => res.json({ success: true, data: req.user }));
+app.get('/api/auth/profile', wrap(async (req, res) => {
+  const [u] = await q('SELECT id, name, username, role, photo, is_active, created_at FROM users WHERE id = ?', [req.user.id]);
+  res.json({ success: true, data: u || req.user });
+}));
 
 /* ---------- generic list (pagination, search, limit, sorting, filter) ---------- */
 async function list(c, query) {
@@ -138,8 +141,8 @@ const R = {
   },
   users: {
     table: 'users', search: ['name', 'username'], filters: ['role'], sort: ['id', 'name', 'created_at'],
-    select: 'id, name, username, role, is_active, created_at', ownerAll: true, password: true,
-    fields: ['name', 'username', 'role', 'is_active'], required: ['name', 'username', 'role'],
+    select: 'id, name, username, role, photo, is_active, created_at', ownerAll: true, password: true,
+    fields: ['name', 'username', 'role', 'photo', 'is_active'], required: ['name', 'username', 'role'],
   },
   transactions: {
     table: 'transactions', search: ['invoice_no', 'customer_name', 'staff_names'], filters: ['payment_method', 'status'],
@@ -519,6 +522,11 @@ app.use((err, req, res, next) => { // eslint-disable-line
     const cols = await q("SHOW COLUMNS FROM staff LIKE 'photo'");
     if (!cols.length) await q("ALTER TABLE staff ADD COLUMN photo VARCHAR(255) NULL");
   } catch (e) { console.warn('Migration staff photo:', e.message); }
+
+  try {
+    const cols = await q("SHOW COLUMNS FROM users LIKE 'photo'");
+    if (!cols.length) await q("ALTER TABLE users ADD COLUMN photo VARCHAR(255) NULL AFTER role");
+  } catch (e) { console.warn('Migration users photo:', e.message); }
 
   try {
     await q("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid','partial','unpaid','void','pending') NOT NULL DEFAULT 'paid'");

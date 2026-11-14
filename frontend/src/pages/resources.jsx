@@ -555,6 +555,21 @@ export const UsersPage = () => (
       </div>
     }
     columns={[
+      {
+        key: 'photo',
+        label: 'Foto',
+        render: (r) => (
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-stone-100 ring-1 ring-stone-200/80">
+            {r.photo ? (
+              <img src={imageUrl(r.photo)} alt={r.name} className="h-full w-full object-cover" />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-gradient-warm text-xs font-bold text-white">
+                {r.name?.charAt(0)?.toUpperCase() || '?'}
+              </div>
+            )}
+          </div>
+        ),
+      },
       { key: 'name', label: 'Nama Lengkap', render: (r) => <span className="font-semibold text-ink">{r.name}</span> },
       { key: 'username', label: 'Username', render: (r) => <code className="rounded bg-stone-100 px-1.5 py-0.5 text-xs font-medium text-stone-700">{r.username}</code> },
       {
@@ -569,6 +584,7 @@ export const UsersPage = () => (
       activeCol,
     ]}
     fields={[
+      { name: 'photo', label: 'Foto Profil', type: 'image' },
       { name: 'name', label: 'Nama Lengkap', required: true },
       { name: 'username', label: 'Username', required: true },
       {
