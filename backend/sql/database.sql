@@ -55,7 +55,9 @@ CREATE TABLE transactions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   invoice_no VARCHAR(40) NOT NULL UNIQUE,
   customer_id INT NULL, customer_name VARCHAR(100),
-  staff_id INT NULL, cashier_id INT, cashier_name VARCHAR(100),
+  staff_id INT NULL,
+  staff_names VARCHAR(255) NULL,
+  cashier_id INT, cashier_name VARCHAR(100),
   payment_method ENUM('cash','transfer','qris','debit') NOT NULL DEFAULT 'cash',
   subtotal DECIMAL(14,2) NOT NULL,
   discount DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -81,6 +83,20 @@ CREATE TABLE transaction_items (
   subtotal DECIMAL(14,2) NOT NULL, commission DECIMAL(14,2) NOT NULL DEFAULT 0,
   FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
   FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL
+);
+
+-- relasi transaksi dengan staf/pegawai yang melayani (bisa lebih dari 1 orang)
+CREATE TABLE transaction_staff (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  transaction_id INT NOT NULL,
+  staff_id INT NOT NULL,
+  staff_name VARCHAR(100) NOT NULL,
+  commission DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (transaction_id),
+  INDEX (staff_id),
+  FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 );
 
 CREATE TABLE expenses (

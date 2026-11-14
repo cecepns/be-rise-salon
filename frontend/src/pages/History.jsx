@@ -146,10 +146,16 @@ export default function HistoryPage() {
     },
     {
       key: 'customer_name',
-      label: 'Pelanggan',
+      label: 'Pelanggan & Pegawai',
       render: (r) => (
         <div>
           <span className="font-medium text-ink">{r.customer_name || 'Pelanggan Umum'}</span>
+          {(r.staff_names || r.staff_name) && (
+            <div className="flex items-center gap-1 text-[11px] font-medium text-brand-700">
+              <span className="opacity-70">Pegawai:</span>
+              <span>{r.staff_names || r.staff_name}</span>
+            </div>
+          )}
           {r.cashier_name && (
             <div className="text-[10px] text-stone-400">Kasir: {r.cashier_name}</div>
           )}

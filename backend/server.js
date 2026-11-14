@@ -142,7 +142,7 @@ const R = {
     fields: ['name', 'username', 'role', 'is_active'], required: ['name', 'username', 'role'],
   },
   transactions: {
-    table: 'transactions', search: ['invoice_no', 'customer_name'], filters: ['payment_method', 'status'],
+    table: 'transactions', search: ['invoice_no', 'customer_name', 'staff_names'], filters: ['payment_method', 'status'],
     sort: ['id', 'total', 'created_at'], readOnly: true,
   },
 };
@@ -245,11 +245,35 @@ app.post('/api/transactions', wrap(async (req, res) => {
       }
     }
 
+    // Multi-staff support
+    let staffIds = [];
+    if (Array.isArray(req.body.staff_ids)) {
+      staffIds = req.body.staff_ids.map(Number).filter((id) => id > 0);
+    } else if (req.body.staff_id) {
+      staffIds = [Number(req.body.staff_id)].filter((id) => id > 0);
+    }
+    // Deduplicate
+    staffIds = [...new Set(staffIds)];
+
+    let staffList = [];
+    let staffNamesStr = null;
+    let primaryStaffId = staffIds[0] || null;
+
+    if (staffIds.length > 0) {
+      const [fetchedStaff] = await conn.query(
+        'SELECT id, name FROM staff WHERE id IN (?)',
+        [staffIds]
+      );
+      staffList = fetchedStaff;
+      staffNamesStr = staffList.map((s) => s.name).join(', ');
+    }
+
     const txData = {
       invoice_no: 'TMP-' + Date.now(),
       customer_id: req.body.customer_id || null,
       customer_name: customerName,
-      staff_id: req.body.staff_id || null,
+      staff_id: primaryStaffId,
+      staff_names: staffNamesStr,
       cashier_id: req.user.id,
       cashier_name: req.user.name,
       payment_method,
@@ -279,6 +303,23 @@ app.post('/api/transactions', wrap(async (req, res) => {
       'INSERT INTO transaction_items (transaction_id, item_id, item_name, price, qty, subtotal, commission) VALUES ?',
       [rows.map((r) => [tx.insertId, ...r.slice(1)])]
     );
+
+    // Simpan ke transaction_staff & bagi rata komisi per staf
+    if (staffList.length > 0) {
+      const baseCom = Math.floor(commissionTotal / staffList.length);
+      const rem = commissionTotal - (baseCom * staffList.length);
+      const staffRows = staffList.map((s, idx) => [
+        tx.insertId,
+        s.id,
+        s.name,
+        baseCom + (idx === 0 ? rem : 0),
+      ]);
+      await conn.query(
+        'INSERT INTO transaction_staff (transaction_id, staff_id, staff_name, commission) VALUES ?',
+        [staffRows]
+      );
+    }
+
     await conn.commit();
     res.status(201).json({ success: true, data: { id: tx.insertId, invoice_no: invoice, status, total, paid_amount } });
   } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
@@ -290,6 +331,14 @@ app.get('/api/transactions/:id', wrap(async (req, res) => {
     : await q('SELECT * FROM transactions WHERE id = ?', [req.params.id]);
   if (!tx) throw fail(404, 'Transaksi tidak ditemukan');
   tx.lines = await q('SELECT * FROM transaction_items WHERE transaction_id = ?', [tx.id]);
+  const staffRows = await q('SELECT staff_id, staff_name, commission FROM transaction_staff WHERE transaction_id = ?', [tx.id]);
+  if (staffRows.length > 0) {
+    tx.staff = staffRows;
+  } else if (tx.staff_id) {
+    tx.staff = [{ staff_id: tx.staff_id, staff_name: tx.staff_names || tx.staff_name || 'Staff', commission: tx.commission_total }];
+  } else {
+    tx.staff = [];
+  }
   res.json({ success: true, data: tx });
 }));
 
@@ -345,15 +394,19 @@ app.get('/api/dashboard/stats', wrap(async (req, res) => {
     "SELECT COUNT(*) pendingCount FROM transactions WHERE status IN ('pending', 'unpaid', 'partial')"
   );
   const [{ totalStaffCommission }] = await q(
-    "SELECT COALESCE(SUM(commission_total), 0) totalStaffCommission FROM transactions WHERE status = 'paid' AND staff_id IS NOT NULL"
+    `SELECT COALESCE(SUM(ts.commission), 0) totalStaffCommission 
+     FROM transaction_staff ts 
+     JOIN transactions tx ON tx.id = ts.transaction_id 
+     WHERE tx.status = 'paid'`
   );
   const staffCommissions = await q(
     `SELECT s.id, s.name, s.position, s.photo,
-            COALESCE(SUM(tx.commission_total), 0) AS total_commission,
-            COUNT(tx.id) AS transaction_count,
-            COALESCE(SUM(CASE WHEN DATE(tx.created_at) = ? THEN tx.commission_total ELSE 0 END), 0) AS today_commission
+            COALESCE(SUM(CASE WHEN tx.id IS NOT NULL THEN ts.commission ELSE 0 END), 0) AS total_commission,
+            COUNT(DISTINCT tx.id) AS transaction_count,
+            COALESCE(SUM(CASE WHEN tx.id IS NOT NULL AND DATE(tx.created_at) = ? THEN ts.commission ELSE 0 END), 0) AS today_commission
      FROM staff s
-     LEFT JOIN transactions tx ON tx.staff_id = s.id AND tx.status = 'paid'
+     LEFT JOIN transaction_staff ts ON ts.staff_id = s.id
+     LEFT JOIN transactions tx ON tx.id = ts.transaction_id AND tx.status = 'paid'
      WHERE s.is_active = 1
      GROUP BY s.id, s.name, s.position, s.photo
      ORDER BY total_commission DESC, s.name ASC`,
@@ -394,11 +447,12 @@ app.get('/api/reports/summary', ownerOnly, wrap(async (req, res) => {
      GROUP BY ti.item_id, ti.item_name ORDER BY commission DESC, revenue DESC`, [from, to]);
   const byStaff = await q(
     `SELECT s.id, s.name, s.position, s.photo,
-            COUNT(tx.id) AS transaction_count,
-            COALESCE(SUM(tx.total), 0) AS total_sales,
-            COALESCE(SUM(tx.commission_total), 0) AS total_commission
+            COUNT(DISTINCT tx.id) AS transaction_count,
+            COALESCE(SUM(CASE WHEN tx.id IS NOT NULL THEN tx.total ELSE 0 END), 0) AS total_sales,
+            COALESCE(SUM(CASE WHEN tx.id IS NOT NULL THEN ts.commission ELSE 0 END), 0) AS total_commission
      FROM staff s
-     LEFT JOIN transactions tx ON tx.staff_id = s.id AND tx.status = 'paid' AND DATE(tx.created_at) BETWEEN ? AND ?
+     LEFT JOIN transaction_staff ts ON ts.staff_id = s.id
+     LEFT JOIN transactions tx ON tx.id = ts.transaction_id AND tx.status = 'paid' AND DATE(tx.created_at) BETWEEN ? AND ?
      WHERE s.is_active = 1
      GROUP BY s.id, s.name, s.position, s.photo
      ORDER BY total_commission DESC, total_sales DESC, s.name ASC`,
@@ -490,6 +544,34 @@ app.use((err, req, res, next) => { // eslint-disable-line
       await q("ALTER TABLE transactions ADD COLUMN extra_fee_note VARCHAR(100) NULL AFTER extra_fee");
     }
   } catch (e) { console.warn('Migration transactions extra_fee:', e.message); }
+
+  try {
+    const cols = await q("SHOW COLUMNS FROM transactions LIKE 'staff_names'");
+    if (!cols.length) await q("ALTER TABLE transactions ADD COLUMN staff_names VARCHAR(255) NULL AFTER staff_id");
+  } catch (e) { console.warn('Migration transactions staff_names:', e.message); }
+
+  try {
+    await q(`CREATE TABLE IF NOT EXISTS transaction_staff (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      transaction_id INT NOT NULL,
+      staff_id INT NOT NULL,
+      staff_name VARCHAR(100) NOT NULL,
+      commission DECIMAL(14,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX (transaction_id),
+      INDEX (staff_id),
+      FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    )`);
+    await q(`
+      INSERT INTO transaction_staff (transaction_id, staff_id, staff_name, commission)
+      SELECT t.id, t.staff_id, s.name, t.commission_total
+      FROM transactions t
+      JOIN staff s ON s.id = t.staff_id
+      LEFT JOIN transaction_staff ts ON ts.transaction_id = t.id AND ts.staff_id = t.staff_id
+      WHERE t.staff_id IS NOT NULL AND ts.id IS NULL
+    `);
+  } catch (e) { console.warn('Migration transaction_staff table:', e.message); }
 
   const [{ n }] = await q('SELECT COUNT(*) n FROM users');
   if (!n) {

@@ -33,6 +33,8 @@ export default function Cashier() {
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState([]);
   const [form, setForm] = useState({ customer_id: '', staff_id: '', payment_method: 'cash', notes: '' });
+  const [selectedStaff, setSelectedStaff] = useState([]); // [{ id, name, position, photo }]
+  const [showAddStaff, setShowAddStaff] = useState(false);
   const [addCustomer, setAddCustomer] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -88,6 +90,35 @@ export default function Cashier() {
   const subtotal = cart.reduce((s, l) => s + l.item.price * l.qty, 0);
   const totalQty = cart.reduce((s, l) => s + l.qty, 0);
 
+  // Hitung total estimasi komisi dari keranjang (diambil per item)
+  const totalCommission = cart.reduce((sum, l) => {
+    const it = l.item;
+    const sub = it.price * l.qty;
+    const com =
+      it.commission_type === 'percent'
+        ? Math.round((sub * Number(it.commission_value || 0)) / 100)
+        : it.commission_type === 'fixed'
+        ? Math.round(Number(it.commission_value || 0) * l.qty)
+        : 0;
+    return sum + com;
+  }, 0);
+
+  const handleAddStaff = (staffId, staffObj) => {
+    if (!staffObj || !staffObj.id) return;
+    setSelectedStaff((prev) => {
+      if (prev.some((s) => s.id === staffObj.id)) {
+        toast('Pegawai ini sudah ditambahkan', { icon: 'ℹ️' });
+        return prev;
+      }
+      return [...prev, staffObj];
+    });
+    setShowAddStaff(false);
+  };
+
+  const handleRemoveStaff = (staffId) => {
+    setSelectedStaff((prev) => prev.filter((s) => s.id !== staffId));
+  };
+
   // Perhitungan diskon nominal berdasarkan mode
   const discountNominal =
     discountMode === 'percent'
@@ -133,7 +164,8 @@ export default function Cashier() {
         extra_fee_note: extraFeeNote || null,
         paid_amount: currentPaid,
         customer_id: form.customer_id || null,
-        staff_id: form.staff_id || null,
+        staff_id: selectedStaff[0]?.id || null,
+        staff_ids: selectedStaff.map((s) => s.id),
         lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
       };
 
@@ -169,13 +201,16 @@ export default function Cashier() {
           extra_fee: extraFeeAmount,
           extra_fee_note: extraFeeNote || null,
           customer_id: form.customer_id || null,
-          staff_id: form.staff_id || null,
+          staff_id: selectedStaff[0]?.id || null,
+          staff_ids: selectedStaff.map((s) => s.id),
           lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
         },
         success: 'Pesanan disimpan ke Menunggu Pembayaran',
       });
       setCart([]);
       setForm({ customer_id: '', staff_id: '', payment_method: 'cash', notes: '' });
+      setSelectedStaff([]);
+      setShowAddStaff(false);
       setDiscountVal('');
       setTaxPercent('');
       setExtraFee('');
@@ -435,41 +470,109 @@ export default function Cashier() {
               </div>
             </div>
 
-            {/* Pegawai / Stylist */}
-            <div>
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-stone-500">
-                Pegawai (Staff / Stylist)
-              </span>
-              <AsyncSearchSelect
-                value={form.staff_id}
-                onChange={(val) => setForm((f) => ({ ...f, staff_id: val }))}
-                fetchUrl={E.STAFF.LIST}
-                params={{ is_active: 1 }}
-                placeholder="Pilih staff / kapster (opsional)…"
-                searchPlaceholder="Ketik nama staff…"
-                defaultOptions={[{ id: '', name: 'Tanpa staff khusus' }]}
-                renderOption={(s) => (
-                  <div className="flex items-center gap-2">
-                    {s.photo ? (
-                      <img src={imageUrl(s.photo)} className="h-6 w-6 rounded-full object-cover" />
-                    ) : (
-                      <div className="grid h-6 w-6 place-items-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
-                        {s.name?.charAt(0)}
-                      </div>
-                    )}
-                    <div>
-                      <div className="font-medium text-ink">{s.name}</div>
-                      {s.position && <div className="text-[10px] text-stone-400">{s.position}</div>}
-                    </div>
-                  </div>
-                )}
-                renderSelected={(s) => (
-                  <span className="font-medium text-ink">
-                    {s.name}
-                    {s.position ? ` - ${s.position}` : ''}
+            {/* Pegawai / Stylist (Bisa Lebih Dari 1) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                    Pegawai / Stylist
                   </span>
+                  {selectedStaff.length > 0 && (
+                    <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold text-brand-700">
+                      {selectedStaff.length} orang
+                    </span>
+                  )}
+                </div>
+                {selectedStaff.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddStaff((v) => !v)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-200 transition-colors"
+                  >
+                    <Plus size={13} />
+                    {showAddStaff ? 'Tutup Pilihan' : 'Tambah Pegawai'}
+                  </button>
                 )}
-              />
+              </div>
+
+              {/* Chips Pegawai yang Terpilih */}
+              {selectedStaff.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {selectedStaff.map((s) => (
+                    <div
+                      key={s.id}
+                      className="group flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50/80 py-1 pl-1.5 pr-2 text-xs shadow-xs transition-all hover:border-brand-300"
+                    >
+                      {s.photo ? (
+                        <img src={imageUrl(s.photo)} className="h-6 w-6 rounded-lg object-cover ring-1 ring-brand-300" />
+                      ) : (
+                        <div className="grid h-6 w-6 place-items-center rounded-lg bg-brand-600 text-[10px] font-bold text-white">
+                          {s.name?.charAt(0)}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-semibold text-ink leading-tight">{s.name}</div>
+                        {s.position && <div className="text-[10px] text-brand-700 leading-tight">{s.position}</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveStaff(s.id)}
+                        className="ml-1 rounded-md p-1 text-stone-400 hover:bg-rose-100 hover:text-rose-600 transition-colors"
+                        title="Hapus pegawai ini"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Dropdown Pencarian Staff */}
+              {(selectedStaff.length === 0 || showAddStaff) && (
+                <AsyncSearchSelect
+                  value=""
+                  onChange={handleAddStaff}
+                  fetchUrl={E.STAFF.LIST}
+                  params={{ is_active: 1 }}
+                  placeholder={
+                    selectedStaff.length > 0
+                      ? 'Pilih pegawai tambahan…'
+                      : 'Pilih staff / stylist yang melayani (bisa >1)…'
+                  }
+                  searchPlaceholder="Ketik nama staff…"
+                  renderOption={(s) => {
+                    const isSelected = selectedStaff.some((st) => st.id === s.id);
+                    return (
+                      <div className={`flex items-center justify-between gap-2 ${isSelected ? 'opacity-40' : ''}`}>
+                        <div className="flex items-center gap-2">
+                          {s.photo ? (
+                            <img src={imageUrl(s.photo)} className="h-6 w-6 rounded-full object-cover" />
+                          ) : (
+                            <div className="grid h-6 w-6 place-items-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
+                              {s.name?.charAt(0)}
+                            </div>
+                          )}
+                          <div>
+                            <div className="font-medium text-ink">{s.name}</div>
+                            {s.position && <div className="text-[10px] text-stone-400">{s.position}</div>}
+                          </div>
+                        </div>
+                        {isSelected && <span className="text-[10px] font-semibold text-brand-600">Sudah Dipilih</span>}
+                      </div>
+                    );
+                  }}
+                />
+              )}
+
+              {/* Info Pembagian Komisi jika lebih dari 1 pegawai */}
+              {selectedStaff.length > 1 && totalCommission > 0 && (
+                <div className="flex items-center justify-between rounded-lg bg-amber-50/80 border border-amber-200/60 px-2.5 py-1.5 text-xs text-amber-800">
+                  <span>Komisi dibagi rata ({selectedStaff.length} orang):</span>
+                  <span className="font-bold text-amber-900">
+                    {rupiah(Math.floor(totalCommission / selectedStaff.length))}/orang
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

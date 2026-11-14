@@ -312,6 +312,9 @@ export async function printThermalReceipt({ tx, shop = {}, paperWidth = 58, incl
   b.lr('No', tx.invoice_no);
   b.lr('Waktu', fmtDate(tx.created_at));
   b.lr('Pelanggan', tx.customer_name || 'Umum');
+  if (tx.staff_names || tx.staff_name) {
+    b.lr('Pegawai', tx.staff_names || tx.staff_name);
+  }
   b.lr('Kasir', tx.cashier_name || '-');
   b.hr('-');
 

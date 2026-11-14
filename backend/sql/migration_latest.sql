@@ -58,3 +58,36 @@ DEALLOCATE PREPARE stmt_note;
 
 -- 6. Update data transaksi lama: jika status 'paid', pastikan paid_amount = total
 UPDATE transactions SET paid_amount = total WHERE status = 'paid' AND (paid_amount IS NULL OR paid_amount = 0);
+
+-- 7. Tambahkan kolom staff_names untuk menyimpan multi-pegawai
+SET @staff_names_exists := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'transactions' AND COLUMN_NAME = 'staff_names');
+SET @sql_staff_names := IF(@staff_names_exists = 0, 'ALTER TABLE transactions ADD COLUMN staff_names VARCHAR(255) NULL AFTER staff_id;', 'SELECT 1;');
+PREPARE stmt_snames FROM @sql_staff_names;
+EXECUTE stmt_snames;
+DEALLOCATE PREPARE stmt_snames;
+
+-- 8. Buat tabel relasi transaction_staff untuk mencatat pegawai yang mengerjakan
+CREATE TABLE IF NOT EXISTS transaction_staff (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  transaction_id INT NOT NULL,
+  staff_id INT NOT NULL,
+  staff_name VARCHAR(100) NOT NULL,
+  commission DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX (transaction_id),
+  INDEX (staff_id),
+  FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+  FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+);
+
+UPDATE transactions t 
+JOIN staff s ON s.id = t.staff_id 
+SET t.staff_names = s.name 
+WHERE t.staff_id IS NOT NULL AND (t.staff_names IS NULL OR t.staff_names = '');
+
+INSERT INTO transaction_staff (transaction_id, staff_id, staff_name, commission)
+SELECT t.id, t.staff_id, s.name, t.commission_total
+FROM transactions t
+JOIN staff s ON s.id = t.staff_id
+LEFT JOIN transaction_staff ts ON ts.transaction_id = t.id AND ts.staff_id = t.staff_id
+WHERE t.staff_id IS NOT NULL AND ts.id IS NULL;

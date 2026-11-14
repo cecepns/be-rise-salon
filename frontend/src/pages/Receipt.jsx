@@ -210,6 +210,9 @@ export default function Receipt() {
         <Row a="No" b={tx.invoice_no} />
         <Row a="Waktu" b={dateTime(tx.created_at)} />
         <Row a="Pelanggan" b={tx.customer_name} />
+        {(tx.staff_names || tx.staff_name) && (
+          <Row a="Pegawai" b={tx.staff_names || tx.staff_name} />
+        )}
         <Row a="Kasir" b={tx.cashier_name} />
         <hr className="my-3 border-dashed border-stone-300" />
 
