@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { Loader2, Eye, EyeOff, Scissors } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Scissors, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -10,6 +10,64 @@ export default function Login() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    // Cek apakah aplikasi sudah berjalan dalam mode standalone (terinstal)
+    if (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true
+    ) {
+      setIsInstalled(true);
+      return;
+    }
+
+    const promptHandler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const installedHandler = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      toast.success('Aplikasi Be Rise Salon berhasil diinstal!');
+    };
+
+    window.addEventListener('beforeinstallprompt', promptHandler);
+    window.addEventListener('appinstalled', installedHandler);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', promptHandler);
+      window.removeEventListener('appinstalled', installedHandler);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice?.outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    } else {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      if (isIOS) {
+        toast('Untuk menginstal di iOS/Safari, tekan tombol Bagikan (Share) lalu pilih "Tambah ke Layar Utama" (Add to Home Screen).', {
+          icon: '📱',
+          duration: 6000,
+        });
+      } else {
+        toast('Buka menu browser Anda atau klik ikon install di address bar untuk menginstal aplikasi.', {
+          icon: 'ℹ️',
+          duration: 5000,
+        });
+      }
+    }
+  };
+
   if (user) return <Navigate to="/" replace />;
 
   const submit = async (e) => {
@@ -105,6 +163,21 @@ export default function Login() {
           Be Rise Salon Management System
         </div>
       </form>
+
+      {/* Floating Install App Button */}
+      {!isInstalled && (
+        <div className="fixed bottom-5 right-5 z-50">
+          <button
+            type="button"
+            onClick={handleInstallClick}
+            className="flex items-center gap-2 rounded-full border border-stone-200/80 bg-white/95 px-4 py-2.5 text-xs sm:text-sm font-bold text-ink shadow-elevated backdrop-blur-md transition-all hover:scale-105 hover:bg-white hover:shadow-2xl active:scale-95"
+            title="Install Aplikasi Be Rise Salon ke Perangkat"
+          >
+            <Download size={16} className="text-brand-600" />
+            <span>Install Aplikasi</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
