@@ -8,7 +8,9 @@ export const API_ENDPOINTS = {
   EXPENSES: crud('/expenses'),
   RESERVATIONS: crud('/reservations'),
   USERS: crud('/users'),
-  TRANSACTIONS: crud('/transactions'),
+  TRANSACTIONS: { ...crud('/transactions'), PAY: (id) => `/transactions/${id}/pay` },
   REPORTS: { SUMMARY: '/reports/summary' },
+  DASHBOARD: { STATS: '/dashboard/stats' },
   SETTINGS: '/settings',
+  UPLOAD: '/upload',
 };

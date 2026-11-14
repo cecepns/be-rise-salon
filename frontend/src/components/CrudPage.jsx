@@ -18,7 +18,7 @@ import { PageHeader } from './ui';
 export default function CrudPage({
   title, subtitle = null, endpoint, columns, fields, filter, dateFilter, actions = [], ownerWrite = false,
   canCreate = true, canEdit = true, canDelete = true, sortBy = 'id', order = 'desc', nameKey = 'name',
-  banner = null,
+  banner = null, renderModal = null,
 }) {
   const { isOwner } = useAuth();
   const t = usePaginated(endpoint.LIST, { sortBy, order });
@@ -119,12 +119,19 @@ export default function CrudPage({
       <DataTable columns={columns} rows={t.rows} loading={t.loading} error={t.error} onRetry={t.reload} rowActions={rowActions} />
       <Pagination pagination={t.pagination} onPage={t.setPage} onLimit={t.setLimit} />
 
-      {modal && (
-        <FormModal
-          title={modal.row ? `Edit ${title}` : `Tambah ${title}`}
-          fields={fields} initial={modal.row} saving={saving} onSubmit={save} onClose={() => setModal(null)}
-        />
-      )}
+      {modal &&
+        (renderModal ? (
+          renderModal({ row: modal.row, onClose: () => setModal(null), onSaved: () => { setModal(null); t.reload(); } })
+        ) : (
+          <FormModal
+            title={modal.row ? `Edit ${title}` : `Tambah ${title}`}
+            fields={fields}
+            initial={modal.row}
+            saving={saving}
+            onSubmit={save}
+            onClose={() => setModal(null)}
+          />
+        ))}
     </div>
   );
 }

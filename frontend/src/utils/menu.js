@@ -1,7 +1,11 @@
-import { Scissors, History, TrendingUp, Users, UserCog, ShoppingCart, Wallet, Printer, Settings, PackagePlus, CalendarClock, ShieldCheck } from 'lucide-react';
+import {
+  Scissors, History, TrendingUp, Users, UserCog, ShoppingCart,
+  Wallet, Printer, Settings, PackagePlus, CalendarClock, ShieldCheck, Clock,
+} from 'lucide-react';
 
 export const MENU = [
   { to: '/cashier', label: 'Kasir', icon: ShoppingCart },
+  { to: '/pending-payments', label: 'Menunggu Pembayaran', icon: Clock },
   { to: '/reservations', label: 'Reservasi', icon: CalendarClock },
   { to: '/items', label: 'Layanan / Item', icon: Scissors },
   { to: '/stock', label: 'Tambah Stok Item', icon: PackagePlus },

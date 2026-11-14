@@ -4,6 +4,7 @@ import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
 import Cashier from '@/pages/Cashier';
+import PendingPayments from '@/pages/PendingPayments';
 import Receipt from '@/pages/Receipt';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
@@ -24,6 +25,7 @@ export default function App() {
       <Route element={<Protected><Layout /></Protected>}>
         <Route index element={<Dashboard />} />
         <Route path="cashier" element={<Cashier />} />
+        <Route path="pending-payments" element={<PendingPayments />} />
         <Route path="items" element={<ItemsPage />} />
         <Route path="stock" element={<Stock />} />
         <Route path="customers" element={<CustomersPage />} />

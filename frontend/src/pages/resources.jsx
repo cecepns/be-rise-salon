@@ -1,10 +1,16 @@
-import { Printer, Ban, Scissors, Package, Crown, Briefcase } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import {
+  Printer, Ban, Scissors, Package, Crown, Briefcase,
+  UserPlus, Users, Loader2, Calendar, Clock,
+} from 'lucide-react';
 import CrudPage from '@/components/CrudPage';
+import Modal from '@/components/Modal';
+import AsyncSearchSelect from '@/components/AsyncSearchSelect';
 import { Badge } from '@/components/ui';
 import { confirmToast } from '@/utils/confirm';
 import { request } from '@/utils/request';
 import { API_ENDPOINTS as E } from '@/utils/endpoints';
-import { rupiah, dateTime, dateOnly } from '@/utils/format';
+import { rupiah, dateTime, dateOnly, imageUrl } from '@/utils/format';
 
 const ACTIVE = [{ value: 1, label: 'Aktif' }, { value: 0, label: 'Nonaktif' }];
 const activeCol = {
@@ -85,6 +91,7 @@ export const CustomersPage = () => (
   />
 );
 
+/* ---- Staff / Stylist (Revisi: Ditambah Foto) ---- */
 export const StaffPage = () => (
   <CrudPage
     title="Staff / Stylist"
@@ -92,13 +99,31 @@ export const StaffPage = () => (
     endpoint={E.STAFF}
     ownerWrite
     columns={[
+      {
+        key: 'photo',
+        label: 'Foto',
+        render: (r) => (
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-stone-100 ring-1 ring-stone-200/80">
+            {r.photo ? (
+              <img src={imageUrl(r.photo)} alt={r.name} className="h-full w-full object-cover" />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-gradient-warm text-xs font-bold text-white">
+                {r.name?.charAt(0)?.toUpperCase() || '?'}
+              </div>
+            )}
+          </div>
+        ),
+      },
       { key: 'name', label: 'Nama', render: (r) => <span className="font-semibold text-ink">{r.name}</span> },
-      { key: 'position', label: 'Posisi' },
+      { key: 'position', label: 'Posisi / Keahlian' },
       { key: 'phone', label: 'Telepon' },
       activeCol,
     ]}
     fields={[
-      { name: 'name', label: 'Nama', required: true }, { name: 'position', label: 'Posisi' }, { name: 'phone', label: 'Telepon' },
+      { name: 'photo', label: 'Foto Staff', type: 'image' },
+      { name: 'name', label: 'Nama Lengkap', required: true },
+      { name: 'position', label: 'Posisi / Keahlian' },
+      { name: 'phone', label: 'Telepon / WhatsApp' },
       { name: 'is_active', label: 'Status', type: 'select', required: true, default: 1, options: ACTIVE },
     ]}
   />
@@ -129,10 +154,332 @@ export const ExpensesPage = () => (
 
 /* ---- Jadwal reservasi ---- */
 const RES_STATUS = [
-  { value: 'pending', label: 'Menunggu' }, { value: 'confirmed', label: 'Dikonfirmasi' },
-  { value: 'done', label: 'Selesai' }, { value: 'cancelled', label: 'Dibatalkan' },
+  { value: 'pending', label: 'Menunggu' },
+  { value: 'confirmed', label: 'Dikonfirmasi' },
+  { value: 'done', label: 'Selesai' },
+  { value: 'cancelled', label: 'Dibatalkan' },
 ];
 const RES_TONE = { pending: 'amber', confirmed: 'brand', done: 'green', cancelled: 'red' };
+
+/* Custom Modal Reservasi dengan Search Pelanggan (API + Debounce) atau Tambah Baru */
+function ReservationModal({ row, onClose, onSaved }) {
+  const isEdit = !!row;
+  const [customerMode, setCustomerMode] = useState('existing'); // 'existing' | 'new'
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [customerName, setCustomerName] = useState(row?.customer_name || '');
+  const [phone, setPhone] = useState(row?.phone || '');
+  const [saveToCustomers, setSaveToCustomers] = useState(true);
+
+  const [itemId, setItemId] = useState(row?.item_id || '');
+  const [staffId, setStaffId] = useState(row?.staff_id || '');
+  const [reservedAt, setReservedAt] = useState(
+    row?.reserved_at ? String(row.reserved_at).replace(' ', 'T').slice(0, 16) : ''
+  );
+  const [status, setStatus] = useState(row?.status || 'pending');
+  const [notes, setNotes] = useState(row?.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const handleSelectCustomer = (val, customer) => {
+    setSelectedCustomerId(val);
+    if (customer) {
+      setCustomerName(customer.name || '');
+      setPhone(customer.phone && customer.phone !== '-' ? customer.phone : '');
+    } else {
+      setCustomerName('');
+      setPhone('');
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const errs = {};
+    if (!customerName?.trim()) errs.customerName = 'Nama pelanggan wajib diisi';
+    if (!reservedAt) errs.reservedAt = 'Tanggal & jam reservasi wajib diisi';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+
+    setSaving(true);
+    try {
+      // Jika mode pelanggan baru dan dicentang simpan ke master data
+      if (customerMode === 'new' && saveToCustomers && !isEdit) {
+        try {
+          await request('post', E.CUSTOMERS.LIST, {
+            data: { name: customerName.trim(), phone: phone.trim() || '-' },
+            silent: true,
+          });
+        } catch {
+          // lewati jika gagal simpan pelanggan
+        }
+      }
+
+      const payload = {
+        customer_name: customerName.trim(),
+        phone: phone.trim() || null,
+        item_id: itemId || null,
+        staff_id: staffId || null,
+        reserved_at: reservedAt,
+        status,
+        notes: notes.trim() || null,
+      };
+
+      if (isEdit) {
+        await request('put', E.RESERVATIONS.DETAIL(row.id), {
+          data: payload,
+          success: 'Jadwal reservasi diperbarui',
+        });
+      } else {
+        await request('post', E.RESERVATIONS.LIST, {
+          data: payload,
+          success: 'Jadwal reservasi berhasil ditambahkan',
+        });
+      }
+
+      onSaved();
+    } catch {
+      // error handled
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={isEdit ? 'Edit Jadwal Reservasi' : 'Tambah Jadwal Reservasi'} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        {/* Pilihan Pelanggan: Cari dari DB atau Tambah Baru */}
+        <div className="space-y-2 rounded-2xl border border-stone-200/80 bg-stone-50/60 p-3.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-stone-600">
+              Pelanggan <span className="text-accent-500">*</span>
+            </span>
+            {!isEdit && (
+              <div className="flex rounded-lg bg-stone-200/70 p-0.5 text-xs font-medium">
+                <button
+                  type="button"
+                  onClick={() => setCustomerMode('existing')}
+                  className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all ${
+                    customerMode === 'existing' ? 'bg-white text-ink shadow-sm' : 'text-stone-600'
+                  }`}
+                >
+                  <Users size={12} /> Cari Pelanggan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomerMode('new');
+                    setSelectedCustomerId('');
+                    setCustomerName('');
+                    setPhone('');
+                  }}
+                  className={`flex items-center gap-1 rounded-md px-2 py-0.5 transition-all ${
+                    customerMode === 'new' ? 'bg-white text-ink shadow-sm' : 'text-stone-600'
+                  }`}
+                >
+                  <UserPlus size={12} /> Baru
+                </button>
+              </div>
+            )}
+          </div>
+
+          {customerMode === 'existing' && !isEdit ? (
+            <div className="space-y-2">
+              <AsyncSearchSelect
+                value={selectedCustomerId}
+                onChange={handleSelectCustomer}
+                fetchUrl={E.CUSTOMERS.LIST}
+                placeholder="Cari nama atau telepon pelanggan…"
+                searchPlaceholder="Ketik nama atau nomor telepon…"
+                renderOption={(c) => (
+                  <div>
+                    <div className="font-medium text-ink">{c.name}</div>
+                    {c.phone && c.phone !== '-' && (
+                      <div className="text-[10px] text-stone-400">{c.phone}</div>
+                    )}
+                  </div>
+                )}
+                renderSelected={(c) => (
+                  <span className="font-medium text-ink">
+                    {c.name}
+                    {c.phone && c.phone !== '-' ? ` (${c.phone})` : ''}
+                  </span>
+                )}
+              />
+              {selectedCustomerId && (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-stone-400">Nama:</span>
+                    <input
+                      className="input !py-1.5 !text-xs !bg-white"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="text-stone-400">Telepon:</span>
+                    <input
+                      className="input !py-1.5 !text-xs !bg-white"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="mb-1 block text-xs text-stone-500">Nama Pelanggan</span>
+                  <input
+                    className="input !bg-white"
+                    placeholder="Nama pelanggan"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <span className="mb-1 block text-xs text-stone-500">No. Telepon / WA</span>
+                  <input
+                    className="input !bg-white"
+                    placeholder="08xxxxxxxxxx"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
+              </div>
+              {!isEdit && (
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-stone-600 select-none">
+                  <input
+                    type="checkbox"
+                    className="rounded border-stone-300 text-brand-600 focus:ring-brand-500"
+                    checked={saveToCustomers}
+                    onChange={(e) => setSaveToCustomers(e.target.checked)}
+                  />
+                  Simpan juga ke daftar master data pelanggan
+                </label>
+              )}
+            </div>
+          )}
+          {errors.customerName && (
+            <span className="text-xs font-medium text-accent-600">{errors.customerName}</span>
+          )}
+        </div>
+
+        {/* Layanan & Staff dengan Search by API */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
+              Layanan Perawatan
+            </span>
+            <AsyncSearchSelect
+              value={itemId}
+              onChange={(val) => setItemId(val)}
+              fetchUrl={E.ITEMS.LIST}
+              params={{ type: 'service', is_active: 1 }}
+              placeholder="Pilih layanan…"
+              searchPlaceholder="Cari nama layanan…"
+              renderOption={(it) => (
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-ink">{it.name}</span>
+                  <span className="text-xs font-semibold text-brand-700">{rupiah(it.price)}</span>
+                </div>
+              )}
+            />
+          </div>
+
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
+              Staff / Stylist
+            </span>
+            <AsyncSearchSelect
+              value={staffId}
+              onChange={(val) => setStaffId(val)}
+              fetchUrl={E.STAFF.LIST}
+              params={{ is_active: 1 }}
+              placeholder="Pilih stylist (opsional)…"
+              searchPlaceholder="Cari nama staff…"
+              defaultOptions={[{ id: '', name: 'Tanpa staff khusus' }]}
+              renderOption={(s) => (
+                <div className="flex items-center gap-2">
+                  {s.photo ? (
+                    <img src={imageUrl(s.photo)} className="h-6 w-6 rounded-full object-cover" />
+                  ) : (
+                    <div className="grid h-6 w-6 place-items-center rounded-full bg-brand-100 text-[10px] font-bold text-brand-700">
+                      {s.name?.charAt(0)}
+                    </div>
+                  )}
+                  <div>
+                    <div className="font-medium text-ink">{s.name}</div>
+                    {s.position && <div className="text-[10px] text-stone-400">{s.position}</div>}
+                  </div>
+                </div>
+              )}
+            />
+          </div>
+        </div>
+
+        {/* Tanggal & Status */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
+              Jadwal Tanggal & Jam <span className="text-accent-500">*</span>
+            </span>
+            <input
+              type="datetime-local"
+              className="input !bg-stone-50/50 focus:!bg-white"
+              value={reservedAt}
+              onChange={(e) => setReservedAt(e.target.value)}
+            />
+            {errors.reservedAt && (
+              <span className="mt-1 block text-xs font-medium text-accent-600">{errors.reservedAt}</span>
+            )}
+          </div>
+
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
+              Status Reservasi
+            </span>
+            <select
+              className="input !bg-stone-50/50 focus:!bg-white"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              {RES_STATUS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Catatan */}
+        <div>
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-stone-600">
+            Catatan Tambahan
+          </span>
+          <textarea
+            rows={2}
+            className="input !bg-stone-50/50 focus:!bg-white"
+            placeholder="Catatan permintaan pelanggan, jenis potongan, dll…"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </div>
+
+        {/* Actions */}
+        <div className="flex justify-end gap-2 border-t border-stone-100 pt-3">
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            Batal
+          </button>
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" />} Simpan Jadwal
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
 export const ReservationsPage = () => (
   <CrudPage
@@ -145,21 +492,30 @@ export const ReservationsPage = () => (
     order="asc"
     filter={{ key: 'status', label: 'Semua status', options: RES_STATUS }}
     columns={[
-      { key: 'reserved_at', label: 'Jadwal', render: (r) => <span className="font-medium text-ink">{dateTime(r.reserved_at)}</span> },
-      { key: 'customer_name', label: 'Pelanggan', render: (r) => <span className="font-semibold text-ink">{r.customer_name}</span> },
-      { key: 'phone', label: 'Telepon' },
-      { key: 'item_name', label: 'Layanan' },
-      { key: 'staff_name', label: 'Stylist' },
-      { key: 'status', label: 'Status', render: (r) => <Badge tone={RES_TONE[r.status]}>{RES_STATUS.find((s) => s.value === r.status)?.label}</Badge> },
+      {
+        key: 'reserved_at',
+        label: 'Jadwal',
+        render: (r) => <span className="font-medium text-ink">{dateTime(r.reserved_at)}</span>,
+      },
+      {
+        key: 'customer_name',
+        label: 'Pelanggan',
+        render: (r) => <span className="font-semibold text-ink">{r.customer_name}</span>,
+      },
+      { key: 'phone', label: 'Telepon', render: (r) => r.phone || <span className="text-stone-300">—</span> },
+      { key: 'item_name', label: 'Layanan', render: (r) => r.item_name || <span className="text-stone-300">—</span> },
+      { key: 'staff_name', label: 'Stylist', render: (r) => r.staff_name || <span className="text-stone-300">—</span> },
+      {
+        key: 'status',
+        label: 'Status',
+        render: (r) => (
+          <Badge tone={RES_TONE[r.status]}>{RES_STATUS.find((s) => s.value === r.status)?.label}</Badge>
+        ),
+      },
     ]}
-    fields={[
-      { name: 'customer_name', label: 'Nama pelanggan', required: true }, { name: 'phone', label: 'Telepon' },
-      { name: 'reserved_at', label: 'Tanggal & jam', type: 'datetime-local', required: true },
-      { name: 'status', label: 'Status', type: 'select', required: true, default: 'pending', options: RES_STATUS },
-      { name: 'item_id', label: 'Layanan', type: 'select', optionsFrom: { url: E.ITEMS.LIST, params: { type: 'service', is_active: 1 } } },
-      { name: 'staff_id', label: 'Staff', type: 'select', optionsFrom: { url: E.STAFF.LIST, params: { is_active: 1 } } },
-      { name: 'notes', label: 'Catatan', type: 'textarea' },
-    ]}
+    renderModal={({ row, onClose, onSaved }) => (
+      <ReservationModal row={row} onClose={onClose} onSaved={onSaved} />
+    )}
   />
 );
 
@@ -232,36 +588,5 @@ export const UsersPage = () => (
   />
 );
 
-/* ---- Riwayat transaksi: kasir bisa lihat & cetak resi, hanya owner yang bisa void ---- */
-export const HistoryPage = () => (
-  <CrudPage
-    title="Riwayat Transaksi"
-    subtitle="Pantau transaksi yang masuk dan cetak ulang resi pembayaran"
-    endpoint={E.TRANSACTIONS}
-    nameKey="invoice_no"
-    dateFilter
-    canCreate={false}
-    canEdit={false}
-    canDelete={false}
-    filter={{ key: 'status', label: 'Semua status', options: [{ value: 'paid', label: 'Lunas' }, { value: 'void', label: 'Void' }] }}
-    columns={[
-      { key: 'invoice_no', label: 'No. Invoice', render: (r) => <span className="font-mono text-xs font-bold text-ink">{r.invoice_no}</span> },
-      { key: 'created_at', label: 'Waktu', render: (r) => dateTime(r.created_at) },
-      { key: 'customer_name', label: 'Pelanggan', render: (r) => <span className="font-medium text-ink">{r.customer_name}</span> },
-      { key: 'cashier_name', label: 'Kasir' },
-      { key: 'payment_method', label: 'Bayar', render: (r) => <Badge tone="stone"><span className="uppercase">{r.payment_method}</span></Badge> },
-      { key: 'total', label: 'Total', render: (r) => <span className="font-bold text-brand-700">{rupiah(r.total)}</span> },
-      { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status === 'paid' ? 'green' : 'red'}>{r.status === 'paid' ? 'Lunas' : 'Void'}</Badge> },
-    ]}
-    actions={[
-      { label: 'Resi', icon: Printer, to: (r) => `/receipt/${r.id}` },
-      {
-        label: 'Void', icon: Ban, show: (r, { isOwner }) => isOwner && r.status === 'paid',
-        onClick: async (r, reload) => {
-          if (!(await confirmToast(`Void transaksi ${r.invoice_no}? Stok produk akan dikembalikan.`, 'Ya, void'))) return;
-          try { await request('delete', E.TRANSACTIONS.DETAIL(r.id), { success: 'Transaksi di-void' }); reload(); } catch { /* toast tampil */ }
-        },
-      },
-    ]}
-  />
-);
+/* ---- Riwayat transaksi: kasir bisa lihat & cetak resi, filter status lengkap, pelunasan tagihan ---- */
+export { default as HistoryPage } from './History';

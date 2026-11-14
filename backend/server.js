@@ -66,7 +66,20 @@ async function list(c, query) {
     c.search.forEach(() => p.push(`%${query.search}%`));
   }
   for (const f of c.filters || []) {
-    if (query[f] !== undefined && query[f] !== '') { where.push(`${f} = ?`); p.push(query[f]); }
+    if (query[f] !== undefined && query[f] !== '') {
+      if (c.table === 'transactions' && f === 'status') {
+        if (query.status === 'unpaid') {
+          where.push("(status = 'unpaid' OR status = 'pending')");
+        } else if (query.status === 'uncompleted') {
+          where.push("(status = 'unpaid' OR status = 'pending' OR status = 'partial')");
+        } else {
+          where.push("status = ?");
+          p.push(query.status);
+        }
+      } else {
+        where.push(`${f} = ?`); p.push(query[f]);
+      }
+    }
   }
   const dc = c.dateCol || 'created_at';
   if (query.from) { where.push(`DATE(${dc}) >= ?`); p.push(query.from); }
@@ -108,7 +121,7 @@ const R = {
   },
   staff: {
     table: 'staff', search: ['name', 'phone', 'position'], filters: ['is_active'], sort: ['id', 'name', 'created_at'],
-    ownerWrite: true, fields: ['name', 'phone', 'position', 'is_active'], required: ['name'],
+    ownerWrite: true, fields: ['name', 'phone', 'position', 'photo', 'is_active'], required: ['name'],
   },
   expenses: {
     table: 'expenses', search: ['title', 'category'], filters: ['category'], dateCol: 'expense_date',
@@ -196,18 +209,70 @@ app.post('/api/transactions', wrap(async (req, res) => {
       rows.push([null, it.id, it.name, it.price, qty, sub, com]);
     }
     const discount = Math.min(Math.max(Number(req.body.discount) || 0, 0), subtotal);
+    const tax = Math.max(Number(req.body.tax) || 0, 0);
+    const extra_fee = Math.max(Number(req.body.extra_fee) || 0, 0);
+    const extra_fee_note = clean(req.body.extra_fee_note) || null;
+    const total = Math.max(subtotal - discount + tax + extra_fee, 0);
+
     let customerName = 'Umum';
     if (req.body.customer_id) {
       const [[c]] = await conn.query('SELECT name FROM customers WHERE id = ?', [req.body.customer_id]);
       if (!c) throw fail(400, 'Pelanggan tidak ditemukan');
       customerName = c.name;
     }
-    const [tx] = await conn.query('INSERT INTO transactions SET ?', [{
-      invoice_no: 'TMP-' + Date.now(), customer_id: req.body.customer_id || null, customer_name: customerName,
-      staff_id: req.body.staff_id || null, cashier_id: req.user.id, cashier_name: req.user.name,
-      payment_method, subtotal, discount, total: subtotal - discount, commission_total: commissionTotal,
+
+    // Status & pembayaran:
+    // instant_pay: boolean (default true)
+    // Jika tidak langsung bayar: bisa belum bayar (paid_amount = 0) atau belum lunas (paid_amount > 0 tapi < total)
+    const instantPay = req.body.instant_pay !== false && req.body.status !== 'pending' && req.body.status !== 'unpaid' && req.body.status !== 'partial';
+
+    let paid_amount = 0;
+    let status = 'paid';
+
+    if (instantPay) {
+      paid_amount = total;
+      status = 'paid';
+    } else {
+      paid_amount = Math.max(Number(req.body.paid_amount) || 0, 0);
+      if (paid_amount >= total && total > 0) {
+        paid_amount = total;
+        status = 'paid';
+      } else if (paid_amount > 0) {
+        status = 'partial'; // Belum Lunas
+      } else {
+        paid_amount = 0;
+        status = req.body.status === 'pending' ? 'pending' : 'unpaid'; // Belum Bayar
+      }
+    }
+
+    const txData = {
+      invoice_no: 'TMP-' + Date.now(),
+      customer_id: req.body.customer_id || null,
+      customer_name: customerName,
+      staff_id: req.body.staff_id || null,
+      cashier_id: req.user.id,
+      cashier_name: req.user.name,
+      payment_method,
+      subtotal,
+      discount,
+      tax,
+      extra_fee,
+      extra_fee_note,
+      total,
+      paid_amount,
+      commission_total: commissionTotal,
+      status,
       notes: clean(notes) || null,
-    }]);
+    };
+
+    if (req.body.created_at) {
+      const d = new Date(req.body.created_at);
+      if (!isNaN(d.getTime())) {
+        txData.created_at = d.toISOString().slice(0, 19).replace('T', ' ');
+      }
+    }
+
+    const [tx] = await conn.query('INSERT INTO transactions SET ?', [txData]);
     const invoice = `BRS-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(tx.insertId).padStart(5, '0')}`;
     await conn.query('UPDATE transactions SET invoice_no = ? WHERE id = ?', [invoice, tx.insertId]);
     await conn.query(
@@ -215,7 +280,7 @@ app.post('/api/transactions', wrap(async (req, res) => {
       [rows.map((r) => [tx.insertId, ...r.slice(1)])]
     );
     await conn.commit();
-    res.status(201).json({ success: true, data: { id: tx.insertId, invoice_no: invoice } });
+    res.status(201).json({ success: true, data: { id: tx.insertId, invoice_no: invoice, status, total, paid_amount } });
   } catch (e) { await conn.rollback(); throw e; } finally { conn.release(); }
 }));
 
@@ -228,12 +293,90 @@ app.get('/api/transactions/:id', wrap(async (req, res) => {
   res.json({ success: true, data: tx });
 }));
 
+// Bayar / lunasi transaksi (pending, unpaid, partial)
+app.post('/api/transactions/:id/pay', wrap(async (req, res) => {
+  const { payment_method = 'cash', notes = null } = req.body;
+  if (!['cash', 'transfer', 'qris', 'debit'].includes(payment_method)) throw fail(400, 'Metode bayar tidak valid');
+  const [tx] = await q("SELECT * FROM transactions WHERE id = ? AND status IN ('pending', 'unpaid', 'partial')", [req.params.id]);
+  if (!tx) throw fail(404, 'Transaksi tidak ditemukan atau sudah lunas');
+
+  const currentPaid = Number(tx.paid_amount || 0);
+  const remaining = Math.max(Number(tx.total) - currentPaid, 0);
+
+  // amount: nominal yang dibayarkan sekarang (default: seluruh sisa)
+  const payNow = req.body.amount !== undefined ? Math.max(Number(req.body.amount) || 0, 0) : remaining;
+  if (payNow <= 0 && remaining > 0) throw fail(400, 'Nominal pembayaran harus lebih besar dari 0');
+
+  const newPaid = Math.min(currentPaid + payNow, Number(tx.total));
+  const newStatus = newPaid >= Number(tx.total) ? 'paid' : 'partial';
+
+  await q(
+    "UPDATE transactions SET status = ?, paid_amount = ?, payment_method = ?, cashier_id = ?, cashier_name = ?, notes = COALESCE(?, notes) WHERE id = ?",
+    [newStatus, newPaid, payment_method, req.user.id, req.user.name, clean(notes), tx.id]
+  );
+  res.json({
+    success: true,
+    data: {
+      id: tx.id,
+      invoice_no: tx.invoice_no,
+      status: newStatus,
+      paid_amount: newPaid,
+      remaining: Math.max(Number(tx.total) - newPaid, 0),
+    },
+  });
+}));
+
 // Void transaksi (owner only lewat guard DELETE global) + kembalikan stok
 app.delete('/api/transactions/:id', wrap(async (req, res) => {
-  const r = await q("UPDATE transactions SET status = 'void' WHERE id = ? AND status = 'paid'", [req.params.id]);
-  if (!r.affectedRows) throw fail(400, 'Transaksi tidak ditemukan atau sudah void');
+  const r = await q("UPDATE transactions SET status = 'void' WHERE id = ? AND status IN ('paid', 'pending', 'unpaid', 'partial')", [req.params.id]);
+  if (!r.affectedRows) throw fail(400, 'Transaksi tidak ditemukan atau sudah dibatalkan');
   await q("UPDATE items i JOIN transaction_items t ON t.item_id = i.id SET i.stock = i.stock + t.qty WHERE t.transaction_id = ? AND i.type = 'product'", [req.params.id]);
   res.json({ success: true });
+}));
+
+/* ---------- dashboard stats & staff commission ---------- */
+app.get('/api/dashboard/stats', wrap(async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const [todayTx] = await q(
+    "SELECT COUNT(*) count, COALESCE(SUM(paid_amount), 0) total, COALESCE(SUM(commission_total), 0) commission FROM transactions WHERE status = 'paid' AND DATE(created_at) = ?",
+    [today]
+  );
+  const [{ pendingCount }] = await q(
+    "SELECT COUNT(*) pendingCount FROM transactions WHERE status IN ('pending', 'unpaid', 'partial')"
+  );
+  const [{ totalStaffCommission }] = await q(
+    "SELECT COALESCE(SUM(commission_total), 0) totalStaffCommission FROM transactions WHERE status = 'paid' AND staff_id IS NOT NULL"
+  );
+  const staffCommissions = await q(
+    `SELECT s.id, s.name, s.position, s.photo,
+            COALESCE(SUM(tx.commission_total), 0) AS total_commission,
+            COUNT(tx.id) AS transaction_count,
+            COALESCE(SUM(CASE WHEN DATE(tx.created_at) = ? THEN tx.commission_total ELSE 0 END), 0) AS today_commission
+     FROM staff s
+     LEFT JOIN transactions tx ON tx.staff_id = s.id AND tx.status = 'paid'
+     WHERE s.is_active = 1
+     GROUP BY s.id, s.name, s.position, s.photo
+     ORDER BY total_commission DESC, s.name ASC`,
+    [today]
+  );
+  res.json({
+    success: true,
+    data: {
+      today: {
+        sales: Number(todayTx?.total || 0),
+        count: Number(todayTx?.count || 0),
+        commission: Number(todayTx?.commission || 0),
+      },
+      pendingCount: Number(pendingCount || 0),
+      totalStaffCommission: Number(totalStaffCommission || 0),
+      staffCommissions: staffCommissions.map((s) => ({
+        ...s,
+        total_commission: Number(s.total_commission || 0),
+        today_commission: Number(s.today_commission || 0),
+        transaction_count: Number(s.transaction_count || 0),
+      })),
+    },
+  });
 }));
 
 /* ---------- reports (owner) ---------- */
@@ -294,6 +437,37 @@ app.use((err, req, res, next) => { // eslint-disable-line
 
 /* ---------- boot ---------- */
 (async () => {
+  // Auto-migration columns
+  try {
+    const cols = await q("SHOW COLUMNS FROM staff LIKE 'photo'");
+    if (!cols.length) await q("ALTER TABLE staff ADD COLUMN photo VARCHAR(255) NULL");
+  } catch (e) { console.warn('Migration staff photo:', e.message); }
+
+  try {
+    await q("ALTER TABLE transactions MODIFY COLUMN status ENUM('paid','partial','unpaid','void','pending') NOT NULL DEFAULT 'paid'");
+  } catch (e) { console.warn('Migration transactions status:', e.message); }
+
+  try {
+    const cols = await q("SHOW COLUMNS FROM transactions LIKE 'paid_amount'");
+    if (!cols.length) {
+      await q("ALTER TABLE transactions ADD COLUMN paid_amount DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER total");
+      await q("UPDATE transactions SET paid_amount = total WHERE status = 'paid'");
+    }
+  } catch (e) { console.warn('Migration transactions paid_amount:', e.message); }
+
+  try {
+    const cols = await q("SHOW COLUMNS FROM transactions LIKE 'tax'");
+    if (!cols.length) await q("ALTER TABLE transactions ADD COLUMN tax DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER discount");
+  } catch (e) { console.warn('Migration transactions tax:', e.message); }
+
+  try {
+    const cols = await q("SHOW COLUMNS FROM transactions LIKE 'extra_fee'");
+    if (!cols.length) {
+      await q("ALTER TABLE transactions ADD COLUMN extra_fee DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER tax");
+      await q("ALTER TABLE transactions ADD COLUMN extra_fee_note VARCHAR(100) NULL AFTER extra_fee");
+    }
+  } catch (e) { console.warn('Migration transactions extra_fee:', e.message); }
+
   const [{ n }] = await q('SELECT COUNT(*) n FROM users');
   if (!n) {
     await q('INSERT INTO users SET ?', [{
