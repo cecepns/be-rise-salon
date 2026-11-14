@@ -325,11 +325,34 @@ export async function printThermalReceipt({ tx, shop = {}, paperWidth = 58, incl
   if (Number(tx.discount) > 0) {
     b.lr('Diskon', `- ${fmtRp(tx.discount)}`);
   }
+  if (Number(tx.tax) > 0) {
+    b.lr('PPN', `+ ${fmtRp(tx.tax)}`);
+  }
+  if (Number(tx.extra_fee) > 0) {
+    b.lr(tx.extra_fee_note || 'Biaya Tambahan', `+ ${fmtRp(tx.extra_fee)}`);
+  }
   b.bold(true).size('tall').lr('TOTAL', fmtRp(tx.total)).size('normal').bold(false);
-  b.lr('Bayar', String(tx.payment_method || 'cash').toUpperCase());
+  b.lr('Dibayar', fmtRp(tx.paid_amount != null ? tx.paid_amount : tx.total));
+
+  const remaining = Math.max(Number(tx.total) - Number(tx.paid_amount || 0), 0);
+  if (remaining > 0) {
+    b.bold(true).lr('SISA', fmtRp(remaining)).bold(false);
+  }
+
+  b.lr('Metode', String(tx.payment_method || 'cash').toUpperCase());
+
+  const statusLabel =
+    tx.status === 'paid'
+      ? 'LUNAS (SELESAI)'
+      : tx.status === 'partial'
+      ? 'BELUM LUNAS'
+      : tx.status === 'void'
+      ? 'DIBATALKAN (VOID)'
+      : 'BELUM BAYAR';
+  b.lr('Status', statusLabel);
 
   if (tx.status === 'void') {
-    b.align('center').bold(true).line('').line('** TRANSAKSI VOID **').bold(false).align('left');
+    b.align('center').bold(true).line('').line('** TRANSAKSI DIBATALKAN **').bold(false).align('left');
   }
 
   b.hr('-');

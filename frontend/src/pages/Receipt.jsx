@@ -222,12 +222,40 @@ export default function Receipt() {
 
         <hr className="my-3 border-dashed border-stone-300" />
         <Row a="Subtotal" b={rupiah(tx.subtotal)} />
-        {tx.discount > 0 && <Row a="Diskon" b={`- ${rupiah(tx.discount)}`} />}
+        {Number(tx.discount) > 0 && <Row a="Diskon" b={`- ${rupiah(tx.discount)}`} />}
+        {Number(tx.tax) > 0 && <Row a="PPN" b={`+ ${rupiah(tx.tax)}`} />}
+        {Number(tx.extra_fee) > 0 && (
+          <Row a={tx.extra_fee_note || 'Biaya Tambahan'} b={`+ ${rupiah(tx.extra_fee)}`} />
+        )}
         <div className="my-1.5 border-t border-dashed border-stone-300 pt-1.5">
           <Row a="TOTAL" b={rupiah(tx.total)} bold />
         </div>
-        <Row a="Bayar" b={tx.payment_method.toUpperCase()} />
-        {tx.status === 'void' && <div className="mt-2 rounded bg-stone-100 py-1 text-center font-bold">** TRANSAKSI VOID **</div>}
+        <Row a="Dibayar" b={rupiah(tx.paid_amount != null ? tx.paid_amount : tx.total)} />
+        {Math.max(Number(tx.total) - Number(tx.paid_amount || 0), 0) > 0 && (
+          <Row
+            a="SISA TAGIHAN"
+            b={rupiah(Math.max(Number(tx.total) - Number(tx.paid_amount || 0), 0))}
+            bold
+          />
+        )}
+        <Row a="Metode" b={(tx.payment_method || 'cash').toUpperCase()} />
+        <Row
+          a="Status"
+          b={
+            tx.status === 'paid'
+              ? 'LUNAS (SELESAI)'
+              : tx.status === 'partial'
+              ? 'BELUM LUNAS'
+              : tx.status === 'void'
+              ? 'DIBATALKAN (VOID)'
+              : 'BELUM BAYAR'
+          }
+        />
+        {tx.status === 'void' && (
+          <div className="mt-2 rounded bg-stone-100 py-1 text-center font-bold text-accent-700">
+            ** TRANSAKSI DIBATALKAN (VOID) **
+          </div>
+        )}
 
         <hr className="my-3 border-dashed border-stone-300" />
         <div className="text-center text-[11px] text-stone-600">{shop.receipt_footer || 'Terima kasih atas kunjungan Anda!'}</div>

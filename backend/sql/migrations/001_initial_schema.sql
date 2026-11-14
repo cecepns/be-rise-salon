@@ -128,3 +128,4 @@ CREATE TABLE IF NOT EXISTS settings (
   key_name VARCHAR(50) PRIMARY KEY,
   setting_value TEXT
 );
+

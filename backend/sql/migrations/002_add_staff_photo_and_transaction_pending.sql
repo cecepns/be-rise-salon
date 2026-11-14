@@ -31,3 +31,4 @@ DEALLOCATE PREPARE alterStaffPhoto;
 -- 2. Modifikasi kolom status transaksi untuk mendukung nilai 'pending'
 ALTER TABLE transactions 
   MODIFY COLUMN status ENUM('paid','void','pending') NOT NULL DEFAULT 'paid';
+

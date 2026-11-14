@@ -64,3 +64,4 @@ DEALLOCATE PREPARE stmt_extra_note;
 
 -- 6. Update data lama: jika status 'paid', pastikan paid_amount terisi sama dengan total
 UPDATE transactions SET paid_amount = total WHERE status = 'paid' AND (paid_amount IS NULL OR paid_amount = 0);
+

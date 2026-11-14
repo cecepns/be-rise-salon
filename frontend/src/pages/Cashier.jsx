@@ -3,13 +3,14 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   Minus, Plus, Search, UserPlus, Loader2, Scissors, Package,
   ShoppingBag, Trash2, Banknote, Landmark, QrCode, CreditCard,
-  Clock, PauseCircle,
+  Clock, PauseCircle, Check, X, Calendar, Percent, Tag,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useDebounce from '@/hooks/useDebounce';
 import FormModal from '@/components/FormModal';
+import Modal from '@/components/Modal';
 import AsyncSearchSelect from '@/components/AsyncSearchSelect';
-import { Skeleton, EmptyState, PageHeader } from '@/components/ui';
+import { Skeleton, EmptyState, PageHeader, Badge } from '@/components/ui';
 import { request } from '@/utils/request';
 import { API_ENDPOINTS as E } from '@/utils/endpoints';
 import { rupiah, imageUrl } from '@/utils/format';
@@ -36,12 +37,29 @@ export default function Cashier() {
   const [saving, setSaving] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
+  // Tanggal Transaksi
+  const [txDate, setTxDate] = useState(() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  });
+
+  // Opsi Kasir Mini: Langsung Bayar vs Tidak Langsung Bayar
+  const [instantPay, setInstantPay] = useState(true);
+  const [paidAmountInput, setPaidAmountInput] = useState('');
+
+  // Biaya Tambahan (PPN & Biaya Tambahan)
+  const [showExtraFeeModal, setShowExtraFeeModal] = useState(false);
+  const [taxPercent, setTaxPercent] = useState('');
+  const [extraFee, setExtraFee] = useState('');
+  const [extraFeeNote, setExtraFeeNote] = useState('');
+
   // Diskon state (% atau Rp)
   const [discountMode, setDiscountMode] = useState('rp'); // 'rp' | 'percent'
   const [discountVal, setDiscountVal] = useState('');
 
   const loadPendingCount = () => {
-    request('get', E.TRANSACTIONS.LIST, { params: { status: 'pending', limit: 1 }, silent: true })
+    request('get', E.TRANSACTIONS.LIST, { params: { status: 'uncompleted', limit: 1 }, silent: true })
       .then((r) => setPendingCount(r?.pagination?.total || 0))
       .catch(() => {});
   };
@@ -76,7 +94,13 @@ export default function Cashier() {
       ? Math.min(Math.round((subtotal * Math.min(Math.max(Number(discountVal) || 0, 0), 100)) / 100), subtotal)
       : Math.min(Math.max(Number(discountVal) || 0, 0), subtotal);
 
-  const finalTotal = Math.max(subtotal - discountNominal, 0);
+  const afterDiscount = Math.max(subtotal - discountNominal, 0);
+  const taxAmount = Math.round((afterDiscount * (Number(taxPercent) || 0)) / 100);
+  const extraFeeAmount = Math.max(Number(extraFee) || 0, 0);
+  const finalTotal = afterDiscount + taxAmount + extraFeeAmount;
+
+  const currentPaid = instantPay ? finalTotal : Math.min(Math.max(Number(paidAmountInput) || 0, 0), finalTotal);
+  const remainingBill = Math.max(finalTotal - currentPaid, 0);
 
   const filteredItems = tab === 'all' ? items : items.filter((it) => it.type === tab);
 
@@ -93,21 +117,33 @@ export default function Cashier() {
     }
   };
 
-  // Proses bayar langsung
-  const pay = async () => {
+  // Submit Transaksi (Langsung Bayar atau Belum Lunas / Belum Bayar)
+  const submitTransaction = async () => {
     if (!cart.length) return toast.error('Keranjang masih kosong');
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        created_at: txDate ? new Date(txDate).toISOString() : undefined,
+        status: instantPay ? 'paid' : currentPaid > 0 ? 'partial' : 'unpaid',
+        instant_pay: instantPay,
+        discount: discountNominal,
+        tax: taxAmount,
+        extra_fee: extraFeeAmount,
+        extra_fee_note: extraFeeNote || null,
+        paid_amount: currentPaid,
+        customer_id: form.customer_id || null,
+        staff_id: form.staff_id || null,
+        lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
+      };
+
       const r = await request('post', E.TRANSACTIONS.LIST, {
-        data: {
-          ...form,
-          status: 'paid',
-          discount: discountNominal,
-          customer_id: form.customer_id || null,
-          staff_id: form.staff_id || null,
-          lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
-        },
-        success: 'Transaksi berhasil diselesaikan',
+        data: payload,
+        success: instantPay
+          ? 'Transaksi berhasil diselesaikan'
+          : currentPaid > 0
+          ? 'Transaksi disimpan (Belum Lunas)'
+          : 'Transaksi disimpan (Belum Bayar)',
       });
       nav(`/receipt/${r.data.id}`);
     } catch {
@@ -126,7 +162,12 @@ export default function Cashier() {
         data: {
           ...form,
           status: 'pending',
+          instant_pay: false,
+          paid_amount: 0,
           discount: discountNominal,
+          tax: taxAmount,
+          extra_fee: extraFeeAmount,
+          extra_fee_note: extraFeeNote || null,
           customer_id: form.customer_id || null,
           staff_id: form.staff_id || null,
           lines: cart.map((l) => ({ item_id: l.item.id, qty: l.qty })),
@@ -136,6 +177,8 @@ export default function Cashier() {
       setCart([]);
       setForm({ customer_id: '', staff_id: '', payment_method: 'cash', notes: '' });
       setDiscountVal('');
+      setTaxPercent('');
+      setExtraFee('');
       loadPendingCount();
     } catch {
       // error handled
@@ -324,6 +367,7 @@ export default function Cashier() {
 
           {/* Customer & Stylist Select with Search by API */}
           <div className="space-y-2.5 border-t border-stone-100 pt-3">
+            {/* Pelanggan */}
             <div>
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-stone-500">
                 Pelanggan
@@ -363,9 +407,38 @@ export default function Cashier() {
               </div>
             </div>
 
+            {/* Tanggal Transaksi & Keterangan */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              <div>
+                <span className="mb-1 block font-semibold text-stone-500 uppercase tracking-wider text-[11px]">
+                  Tanggal Transaksi
+                </span>
+                <div className="relative">
+                  <input
+                    type="datetime-local"
+                    className="input !py-1.5 !text-xs !bg-stone-50/50 focus:!bg-white"
+                    value={txDate}
+                    onChange={(e) => setTxDate(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div>
+                <span className="mb-1 block font-semibold text-stone-500 uppercase tracking-wider text-[11px]">
+                  Keterangan / Catatan
+                </span>
+                <input
+                  className="input !py-1.5 !text-xs !bg-stone-50/50 focus:!bg-white"
+                  placeholder="Keterangan transaksi…"
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {/* Pegawai / Stylist */}
             <div>
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-stone-500">
-                Dilayani Oleh (Staff / Stylist)
+                Pegawai (Staff / Stylist)
               </span>
               <AsyncSearchSelect
                 value={form.staff_id}
@@ -400,32 +473,121 @@ export default function Cashier() {
             </div>
           </div>
 
-          {/* Payment Method Pills */}
-          <div className="space-y-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
-              Metode Pembayaran
-            </span>
-            <div className="grid grid-cols-4 gap-1.5">
-              {PAYMENTS.map((p) => {
-                const active = form.payment_method === p.value;
-                return (
-                  <button
-                    key={p.value}
-                    type="button"
-                    onClick={() => setForm({ ...form, payment_method: p.value })}
-                    className={`flex flex-col items-center gap-1 rounded-xl border py-2 text-[11px] font-semibold transition-all ${
-                      active
-                        ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm'
-                        : 'border-stone-200 bg-stone-50/50 text-stone-500 hover:bg-white hover:text-ink'
-                    }`}
-                  >
-                    <p.icon size={15} />
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
+          {/* Opsi Kasir Mini: Langsung Bayar Toggle & Tambah Biaya Tambahan Button */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3">
+            {/* Toggle Langsung Bayar */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextState = !instantPay;
+                setInstantPay(nextState);
+                if (nextState) {
+                  setPaidAmountInput('');
+                } else if (!paidAmountInput) {
+                  setPaidAmountInput('0');
+                }
+              }}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
+                instantPay
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-400/40'
+                  : 'border-rose-400 bg-rose-50 text-rose-700 ring-1 ring-rose-400/40'
+              }`}
+              title="Klik untuk ubah apakah transaksi langsung dibayar atau disimpan sebagai belum lunas/belum bayar"
+            >
+              {instantPay ? (
+                <>
+                  <Check size={14} className="text-emerald-600 stroke-[3]" />
+                  <span>Langsung bayar</span>
+                </>
+              ) : (
+                <>
+                  <X size={14} className="text-rose-600 stroke-[3]" />
+                  <span>Tidak langsung bayar</span>
+                </>
+              )}
+            </button>
+
+            {/* Tombol Tambah Biaya Tambahan (PPN & Biaya Lain) */}
+            <button
+              type="button"
+              onClick={() => setShowExtraFeeModal(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:border-brand-300 hover:bg-white hover:text-brand-700 transition-all"
+            >
+              <Plus size={13} className="text-brand-600" />
+              <span>Tambah Biaya Tambahan</span>
+              {(Number(taxPercent) > 0 || Number(extraFee) > 0) && (
+                <span className="grid h-4 w-4 place-items-center rounded-full bg-brand-600 text-[10px] font-bold text-white">
+                  !
+                </span>
+              )}
+            </button>
           </div>
+
+          {/* Jika TIDAK Langsung Bayar: Input Jumlah Bayar Sekarang (DP / Bayar Sebagian) */}
+          {!instantPay && (
+            <div className="rounded-2xl border border-amber-200/80 bg-amber-50/60 p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-amber-900 uppercase tracking-wider text-[11px]">
+                  Jumlah Bayar Sekarang (DP)
+                </span>
+                <span className="text-[11px] font-bold">
+                  {currentPaid === 0 ? (
+                    <span className="text-rose-600">Belum Bayar (Rp 0)</span>
+                  ) : currentPaid < finalTotal ? (
+                    <span className="text-amber-700">Belum Lunas</span>
+                  ) : (
+                    <span className="text-emerald-600">Lunas (Selesai)</span>
+                  )}
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max={finalTotal}
+                  className="input !py-2 !text-sm !font-bold !bg-white"
+                  placeholder="0 untuk belum bayar sama sekali"
+                  value={paidAmountInput}
+                  onChange={(e) => setPaidAmountInput(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-between items-center text-[11px] text-stone-500 pt-1 border-t border-amber-200/60">
+                <span>Sisa Tagihan Nanti:</span>
+                <span className="font-bold text-brand-700 text-xs">
+                  {rupiah(remainingBill)}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Payment Method Pills (Hanya jika langsung bayar atau bayar DP > 0) */}
+          {(instantPay || currentPaid > 0) && (
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">
+                Metode Pembayaran
+              </span>
+              <div className="grid grid-cols-4 gap-1.5">
+                {PAYMENTS.map((p) => {
+                  const active = form.payment_method === p.value;
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      onClick={() => setForm({ ...form, payment_method: p.value })}
+                      className={`flex flex-col items-center gap-1 rounded-xl border py-2 text-[11px] font-semibold transition-all ${
+                        active
+                          ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-sm'
+                          : 'border-stone-200 bg-stone-50/50 text-stone-500 hover:bg-white hover:text-ink'
+                      }`}
+                    >
+                      <p.icon size={15} />
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Discount with Rp and % toggle */}
           <div className="space-y-1.5">
@@ -476,7 +638,7 @@ export default function Cashier() {
             </div>
           </div>
 
-          {/* Totals */}
+          {/* Totals Breakdown */}
           <div className="space-y-1.5 rounded-2xl bg-stone-50 p-3.5 text-sm">
             <div className="flex justify-between text-stone-500">
               <span>Subtotal</span>
@@ -488,28 +650,57 @@ export default function Cashier() {
                 <span>- {rupiah(discountNominal)}</span>
               </div>
             )}
+            {taxAmount > 0 && (
+              <div className="flex justify-between text-stone-600">
+                <span>PPN ({taxPercent}%)</span>
+                <span>+ {rupiah(taxAmount)}</span>
+              </div>
+            )}
+            {extraFeeAmount > 0 && (
+              <div className="flex justify-between text-stone-600">
+                <span>{extraFeeNote || 'Biaya Tambahan'}</span>
+                <span>+ {rupiah(extraFeeAmount)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-stone-200/80 pt-2 text-base font-bold text-ink">
-              <span>Total Tagihan</span>
+              <span>Total Harga</span>
               <span className="font-display text-xl text-brand-700">{rupiah(finalTotal)}</span>
             </div>
+            {!instantPay && (
+              <div className="flex justify-between border-t border-dashed border-stone-200 pt-1.5 text-xs">
+                <span className="text-emerald-700 font-medium">Dibayar: {rupiah(currentPaid)}</span>
+                <span className="text-rose-600 font-bold">Sisa: {rupiah(remainingBill)}</span>
+              </div>
+            )}
           </div>
 
-          {/* Action buttons: Pay or Hold */}
+          {/* Action buttons: Bayar (Hijau Kasir Mini) or Simpan Transaksi */}
           <div className="space-y-2 pt-1">
             <button
-              className="btn-primary w-full !py-3 !text-base"
+              className={`w-full !py-3 !text-base flex items-center justify-center gap-2 rounded-xl font-bold shadow-md transition-all ${
+                instantPay
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                  : 'btn-primary'
+              }`}
               disabled={saving || !cart.length}
-              onClick={pay}
+              onClick={submitTransaction}
             >
               {saving && <Loader2 size={18} className="animate-spin" />}
-              {saving ? 'Memproses...' : 'Bayar Sekarang'}
+              {saving
+                ? 'Memproses…'
+                : instantPay
+                ? 'Bayar'
+                : currentPaid > 0
+                ? 'Simpan Transaksi (Belum Lunas)'
+                : 'Simpan Transaksi (Belum Bayar)'}
             </button>
+
             <button
               type="button"
               className="btn-ghost w-full !py-2.5 !text-xs !font-semibold text-stone-700 hover:!border-amber-400 hover:!bg-amber-50 hover:!text-amber-800"
               disabled={saving || !cart.length}
               onClick={holdTransaction}
-              title="Simpan pesanan tanpa langsung bayar"
+              title="Simpan pesanan ke daftar antrean Menunggu Pembayaran"
             >
               <PauseCircle size={15} className="text-amber-600" />
               Tahan (Menunggu Pembayaran)
@@ -517,6 +708,104 @@ export default function Cashier() {
           </div>
         </div>
       </aside>
+
+      {/* Modal Tambah Biaya Tambahan (PPN & Biaya Tambahan) persis Kasir Mini */}
+      {showExtraFeeModal && (
+        <Modal title="Tambah Biaya Tambahan" onClose={() => setShowExtraFeeModal(false)}>
+          <div className="space-y-4">
+            {/* PPN */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-stone-600">PPN (%)</span>
+                <div className="flex gap-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setTaxPercent('0')}
+                    className={`rounded-lg px-2 py-0.5 border ${
+                      taxPercent === '0' || !taxPercent ? 'bg-stone-200 font-bold' : 'bg-stone-50'
+                    }`}
+                  >
+                    0%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaxPercent('11')}
+                    className={`rounded-lg px-2 py-0.5 border ${
+                      taxPercent === '11' ? 'bg-brand-100 text-brand-700 border-brand-300 font-bold' : 'bg-stone-50'
+                    }`}
+                  >
+                    11%
+                  </button>
+                </div>
+              </div>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                className="input !bg-white"
+                placeholder="Persentase PPN (contoh: 11)"
+                value={taxPercent}
+                onChange={(e) => setTaxPercent(e.target.value)}
+              />
+              {Number(taxPercent) > 0 && (
+                <div className="text-right text-xs text-stone-500">
+                  Estimasi PPN: <span className="font-bold text-ink">{rupiah(taxAmount)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Biaya Tambahan */}
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-600">
+                Biaya Tambahan (Rp)
+              </span>
+              <input
+                type="number"
+                min="0"
+                className="input !bg-white"
+                placeholder="Nominal biaya tambahan (Rp)"
+                value={extraFee}
+                onChange={(e) => setExtraFee(e.target.value)}
+              />
+            </div>
+
+            {/* Keterangan Biaya Tambahan */}
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-stone-600">
+                Keterangan Biaya Tambahan
+              </span>
+              <input
+                className="input !bg-white"
+                placeholder="Contoh: Biaya Layanan, Service Charge, Admin"
+                value={extraFeeNote}
+                onChange={(e) => setExtraFeeNote(e.target.value)}
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-between items-center pt-3 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setTaxPercent('');
+                  setExtraFee('');
+                  setExtraFeeNote('');
+                }}
+                className="btn-ghost !text-xs !text-rose-600 hover:!bg-rose-50"
+              >
+                Hapus Biaya Tambahan
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setShowExtraFeeModal(false)}
+              >
+                Simpan & Terapkan
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {addCustomer && (
         <FormModal
