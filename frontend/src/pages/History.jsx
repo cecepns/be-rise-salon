@@ -243,22 +243,22 @@ export default function HistoryPage() {
           <input
             type="date"
             className="input !w-auto !py-1.5 !text-xs !bg-stone-50/50 focus:!bg-white"
-            value={t.from}
-            onChange={(e) => t.setFrom(e.target.value)}
+            value={t.filters.from || ''}
+            onChange={(e) => t.setFilter('from', e.target.value || undefined)}
           />
           <span className="text-stone-400">Sampai:</span>
           <input
             type="date"
             className="input !w-auto !py-1.5 !text-xs !bg-stone-50/50 focus:!bg-white"
-            value={t.to}
-            onChange={(e) => t.setTo(e.target.value)}
+            value={t.filters.to || ''}
+            onChange={(e) => t.setFilter('to', e.target.value || undefined)}
           />
-          {(t.from || t.to) && (
+          {(t.filters.from || t.filters.to) && (
             <button
               type="button"
               onClick={() => {
-                t.setFrom('');
-                t.setTo('');
+                t.setFilter('from', undefined);
+                t.setFilter('to', undefined);
               }}
               className="btn-ghost !px-2 !py-1 !text-[11px] text-stone-400 hover:text-ink"
             >
@@ -269,12 +269,14 @@ export default function HistoryPage() {
       </div>
 
       {/* Transactions Table */}
-      <div className="card overflow-hidden">
+      <div className="space-y-4">
         <DataTable
           columns={columns}
-          data={t.data}
+          rows={t.rows}
           loading={t.loading}
-          actions={(r) => {
+          error={t.error}
+          onRetry={t.reload}
+          rowActions={(r) => {
             const isUnpaidOrPartial = r.status === 'unpaid' || r.status === 'partial' || r.status === 'pending';
             return (
               <div className="flex justify-end items-center gap-1.5">
@@ -315,7 +317,7 @@ export default function HistoryPage() {
             );
           }}
         />
-        <Pagination {...t.pagination} onChange={t.setPage} onLimitChange={t.setLimit} />
+        <Pagination pagination={t.pagination} onPage={t.setPage} onLimit={t.setLimit} />
       </div>
 
       {/* Modal Pelunasan / Pembayaran */}
