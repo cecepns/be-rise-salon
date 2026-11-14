@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Sparkles, Pencil, ArrowRight, Award, UserCheck, TrendingUp,
-  Clock, ShoppingCart, ShoppingBag, Store, MapPin, Phone,
+  Pencil, ArrowRight, TrendingUp, Clock, ShoppingCart, MapPin, Phone,
 } from 'lucide-react';
 import { MENU } from '@/utils/menu';
 import { useAuth } from '@/hooks/useAuth';
 import { request } from '@/utils/request';
 import { API_ENDPOINTS as E } from '@/utils/endpoints';
-import { rupiah, imageUrl } from '@/utils/format';
+import { rupiah } from '@/utils/format';
 import { Skeleton, Badge } from '@/components/ui';
 
 export default function Dashboard() {
@@ -39,8 +38,6 @@ export default function Dashboard() {
   const todaySales = stats?.today?.sales ?? 0;
   const todayCount = stats?.today?.count ?? 0;
   const pendingCount = stats?.pendingCount ?? 0;
-  const staffCommissions = stats?.staffCommissions || [];
-  const totalStaffCommission = stats?.totalStaffCommission ?? 0;
 
   return (
     <div className="space-y-6 pb-20">
@@ -109,78 +106,6 @@ export default function Dashboard() {
             <Pencil size={13} /> Edit Informasi
           </Link>
         )}
-      </div>
-
-      {/* Card: Total Komisi per Karyawan (Revisi #4) */}
-      <div className="card overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 bg-stone-50/60 p-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-200/60">
-              <Award size={18} />
-            </div>
-            <div>
-              <h3 className="font-bold text-ink">Total Komisi per Karyawan</h3>
-              <p className="text-xs text-stone-500">
-                Rekap bagi hasil komisi layanan dan produk yang dikerjakan oleh masing-masing staff
-              </p>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-xs text-stone-400 uppercase tracking-wider font-semibold">
-              Total Semua Komisi
-            </div>
-            <div className="font-display text-lg font-bold text-brand-700">
-              {rupiah(totalStaffCommission)}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-4 sm:p-6">
-          {loading ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-24" />
-              ))}
-            </div>
-          ) : !staffCommissions.length ? (
-            <div className="py-6 text-center text-xs text-stone-400">
-              Belum ada data staff aktif atau transaksi komisi tercatat
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {staffCommissions.map((s) => (
-                <div
-                  key={s.id}
-                  className="card flex items-center gap-3.5 border border-stone-200/80 p-3.5 transition hover:border-brand-300 hover:shadow-card-hover"
-                >
-                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl bg-stone-100 ring-1 ring-stone-200/80">
-                    {s.photo ? (
-                      <img src={imageUrl(s.photo)} alt={s.name} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="grid h-full w-full place-items-center bg-gradient-warm text-sm font-bold text-white">
-                        {s.name?.charAt(0)?.toUpperCase() || '?'}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="truncate font-semibold text-ink">{s.name}</span>
-                      <span className="text-[10px] text-stone-400 shrink-0">{s.transaction_count} tx</span>
-                    </div>
-                    <div className="text-xs text-stone-500 truncate">{s.position || 'Stylist'}</div>
-                    <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-stone-100 pt-1">
-                      <span className="text-[11px] text-stone-400">Total Komisi:</span>
-                      <span className="font-display text-sm font-bold text-brand-700">
-                        {rupiah(s.total_commission)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Menu Grid: Persis Menu Kasir Mini */}

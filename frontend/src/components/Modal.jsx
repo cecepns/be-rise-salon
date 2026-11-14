@@ -13,7 +13,7 @@ export default function Modal({ title, onClose, children }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4 !mt-0" onMouseDown={onClose}>
       {/* Backdrop */}
       <div className="absolute inset-0 bg-ink/50 backdrop-blur-sm animate-fade-in" />
       {/* Panel */}

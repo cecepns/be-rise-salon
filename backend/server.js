@@ -392,7 +392,30 @@ app.get('/api/reports/summary', ownerOnly, wrap(async (req, res) => {
      FROM transaction_items ti JOIN transactions tx ON tx.id = ti.transaction_id
      WHERE tx.status = 'paid' AND DATE(tx.created_at) BETWEEN ? AND ?
      GROUP BY ti.item_id, ti.item_name ORDER BY commission DESC, revenue DESC`, [from, to]);
-  res.json({ success: true, data: { from, to, ...t, ...e, net: t.revenue - e.expenses - t.commission, byItem } });
+  const byStaff = await q(
+    `SELECT s.id, s.name, s.position, s.photo,
+            COUNT(tx.id) AS transaction_count,
+            COALESCE(SUM(tx.total), 0) AS total_sales,
+            COALESCE(SUM(tx.commission_total), 0) AS total_commission
+     FROM staff s
+     LEFT JOIN transactions tx ON tx.staff_id = s.id AND tx.status = 'paid' AND DATE(tx.created_at) BETWEEN ? AND ?
+     WHERE s.is_active = 1
+     GROUP BY s.id, s.name, s.position, s.photo
+     ORDER BY total_commission DESC, total_sales DESC, s.name ASC`,
+    [from, to]
+  );
+  res.json({
+    success: true,
+    data: {
+      from,
+      to,
+      ...t,
+      ...e,
+      net: t.revenue - e.expenses - t.commission,
+      byItem,
+      byStaff,
+    },
+  });
 }));
 
 /* ---------- settings ---------- */
